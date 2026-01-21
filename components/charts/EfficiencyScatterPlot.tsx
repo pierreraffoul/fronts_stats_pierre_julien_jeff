@@ -12,10 +12,8 @@ import {
 } from "recharts";
 
 type EfficiencyScatterPlotProps = {
-  scatterData: Array<{ x: number; y: number }>;
+  data: Array<{ x: number; y: number; team?: string }>;
   trendLine: Array<{ x: number; y: number }>;
-  sampleSize: number;
-  totalMatches: number;
 };
 
 const COLORS = {
@@ -23,20 +21,11 @@ const COLORS = {
 };
 
 export function EfficiencyScatterPlot({
-  scatterData,
+  data,
   trendLine,
-  sampleSize,
-  totalMatches,
 }: EfficiencyScatterPlotProps) {
   return (
-    <div className="space-y-4">
-      {totalMatches > sampleSize && (
-        <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800 dark:border-blue-900/40 dark:bg-blue-950/20 dark:text-blue-200">
-          <strong>Note :</strong> Affichage de {sampleSize.toLocaleString()} matchs sur {totalMatches.toLocaleString()} disponibles 
-          (échantillon pour la lisibilité du graphique). Les calculs de tendance utilisent l'ensemble des données.
-        </div>
-      )}
-      <ResponsiveContainer width="100%" height={400}>
+    <ResponsiveContainer width="100%" height={400}>
       <ScatterChart
         margin={{ top: 20, right: 30, left: 20, bottom: 60 }}
       >
@@ -71,14 +60,21 @@ export function EfficiencyScatterPlot({
         />
         <Scatter
           name="Matchs"
-          data={scatterData}
+          data={data}
           fill={COLORS.primary}
           opacity={0.6}
+        />
+        <Scatter
+          name="Tendance"
+          data={trendLine}
+          fill="none"
+          stroke="#ef4444"
+          strokeWidth={2}
+          line
         />
         <Legend />
       </ScatterChart>
     </ResponsiveContainer>
-    </div>
   );
 }
 

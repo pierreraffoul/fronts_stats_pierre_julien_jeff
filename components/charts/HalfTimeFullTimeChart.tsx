@@ -1,11 +1,9 @@
 "use client";
 
 import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
+  PieChart,
+  Pie,
+  Cell,
   Tooltip,
   Legend,
   ResponsiveContainer,
@@ -14,15 +12,13 @@ import {
 type HalfTimeFullTimeChartProps = {
   data: Array<{
     name: string;
-    Victoire: number;
-    Nul: number;
-    Défaite: number;
+    value: number;
+    fill: string;
   }>;
   stats: {
     total: number;
-    victories: number;
-    draws: number;
-    defeats: number;
+    wins: number;
+    winRate: string;
   };
 };
 
@@ -42,37 +38,38 @@ export function HalfTimeFullTimeChart({ data, stats }: HalfTimeFullTimeChartProp
   }
 
   return (
-    <ResponsiveContainer width="100%" height={400}>
-      <BarChart data={data} layout="vertical">
-        <CartesianGrid strokeDasharray="3 3" className="stroke-zinc-200 dark:stroke-zinc-800" />
-        <XAxis
-          type="number"
-          domain={[0, 100]}
-          className="text-xs"
-          tick={{ fill: "currentColor" }}
-          label={{ value: "Pourcentage (%)", position: "insideBottom", offset: -5 }}
-        />
-        <YAxis
-          dataKey="name"
-          type="category"
-          className="text-xs"
-          tick={{ fill: "currentColor" }}
-          width={150}
-        />
-        <Tooltip
-          contentStyle={{
-            backgroundColor: "white",
-            border: "1px solid #e4e4e7",
-            borderRadius: "8px",
-          }}
-          formatter={(value: number) => `${value}%`}
-        />
-        <Legend />
-        <Bar dataKey="Victoire" stackId="a" fill={COLORS.success} name="Victoire Finale" />
-        <Bar dataKey="Nul" stackId="a" fill={COLORS.warning} name="Match Nul" />
-        <Bar dataKey="Défaite" stackId="a" fill={COLORS.danger} name="Défaite Finale" />
-      </BarChart>
-    </ResponsiveContainer>
+    <div className="space-y-4">
+      <div className="text-center text-sm text-zinc-600 dark:text-zinc-400">
+        <p className="font-semibold">Taux de remontada : {stats.winRate}%</p>
+        <p className="text-xs mt-1">({stats.wins} remontadas sur {stats.total} matchs menés à la mi-temps)</p>
+      </div>
+      <ResponsiveContainer width="100%" height={400}>
+        <PieChart>
+          <Pie
+            data={data}
+            cx="50%"
+            cy="50%"
+            labelLine={false}
+            label={(entry) => `${entry.name}: ${entry.value}`}
+            outerRadius={120}
+            fill="#8884d8"
+            dataKey="value"
+          >
+            {data.map((entry, index) => (
+              <Cell key={`cell-${index}`} fill={entry.fill} />
+            ))}
+          </Pie>
+          <Tooltip
+            contentStyle={{
+              backgroundColor: "white",
+              border: "1px solid #e4e4e7",
+              borderRadius: "8px",
+            }}
+          />
+          <Legend />
+        </PieChart>
+      </ResponsiveContainer>
+    </div>
   );
 }
 

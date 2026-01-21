@@ -28,6 +28,7 @@ export interface MatchHistoryRow {
   fthg: Maybe<number>;
   ftag: Maybe<number>;
   ftr?: Maybe<string>; // 'H' (Home), 'D' (Draw), 'A' (Away)
+  htr?: Maybe<string>; // 'H' (Home), 'D' (Draw), 'A' (Away) - Half Time Result
   cote_dom_clean?: Maybe<number>;
   cote_ext_clean?: Maybe<number>;
   hs?: Maybe<number>; // Tirs totaux domicile

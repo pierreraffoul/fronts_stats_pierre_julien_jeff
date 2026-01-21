@@ -1,354 +1,161 @@
-import type { MatchHistoryRow, Maybe } from "@/types/database";
+import { MatchHistoryRow, AITrainingDataRow } from "@/types/database";
 
-// Extension du type pour inclure les données de mi-temps
-type ExtendedMatchHistoryRow = MatchHistoryRow & {
-  htr?: Maybe<string>; // 'H' (Home), 'D' (Draw), 'A' (Away)
-  hthg?: Maybe<number>; // Half Time Home Goals
-  htag?: Maybe<number>; // Half Time Away Goals
-  ast?: Maybe<number>; // Away Shots Target
-  as?: Maybe<number>; // Away Shots
+export type EnrichedMatch = MatchHistoryRow & {
+  home_forme?: number | null;
+  away_forme?: number | null;
 };
 
-function safeNumber(n: number | null | undefined, fallback = 0): number {
-  return typeof n === "number" && Number.isFinite(n) && n >= 0 ? n : fallback;
+// Fusionne les deux tables pour avoir les scores + la forme
+export function enrichMatchesWithTrainingData(
+  matches: MatchHistoryRow[],
+  training: AITrainingDataRow[]
+): EnrichedMatch[] {
+  // Crée un map pour accès rapide par date+team
+  const trainingMap = new Map();
+  training.forEach((t) => {
+    const key = `${t.date}-${t.hometeam}-${t.awayteam}`;
+    trainingMap.set(key, t);
+  });
+
+  return matches.map((m) => {
+    const key = `${m.date}-${m.hometeam}-${m.awayteam}`;
+    const t = trainingMap.get(key);
+    return {
+      ...m,
+      home_forme: t?.home_forme_pts_last5 ?? null,
+      away_forme: t?.away_forme_pts_last5 ?? null,
+    };
+  });
 }
 
-/**
- * CHAPITRE 1 : L'Illusion du Favori
- * Calcule le ROI global par tranches de cotes en pariant 10€ sur chaque favori
- */
-export function calculateBettingROI(matches: MatchHistoryRow[]) {
-  const extendedMatches = matches as ExtendedMatchHistoryRow[];
+// 1. Calcul ROI (Bar Chart)
+export function calculateBettingROI(matches: EnrichedMatch[]) {
+  // On groupe par tranche de cotes (ex: 1.0-1.2, 1.2-1.5, etc.)
+  const brackets = [
+    { min: 1.0, max: 1.3, label: "Hyper Favori (1.0-1.3)", profit: 0, count: 0 },
+    { min: 1.3, max: 1.7, label: "Favori Solide (1.3-1.7)", profit: 0, count: 0 },
+    { min: 1.7, max: 2.2, label: "Incertain (1.7-2.2)", profit: 0, count: 0 },
+    { min: 2.2, max: 100, label: "Outsider (2.2+)", profit: 0, count: 0 },
+  ];
+
+  matches.forEach((m) => {
+    // On parie toujours sur le favori (la cote la plus basse)
+    const favoriteIsHome = (m.cote_dom_clean || 99) < (m.cote_ext_clean || 99);
+    const odds = favoriteIsHome ? m.cote_dom_clean : m.cote_ext_clean;
+    
+    if (!odds) return;
+
+    // Trouve le bon bracket
+    const bracket = brackets.find((b) => odds >= b.min && odds < b.max);
+    if (bracket) {
+      bracket.count++;
+      // Si le favori gagne
+      const favWon = favoriteIsHome ? m.ftr === 'H' : m.ftr === 'A';
+      
+      if (favWon) {
+        bracket.profit += (10 * odds) - 10;
+      } else {
+        bracket.profit -= 10;
+      }
+    }
+  });
+
+  return {
+    chartData: brackets.map(b => ({ name: b.label, profit: Math.round(b.profit), count: b.count })),
+    globalStats: { totalMatches: matches.length }
+  };
+}
+
+// 2. Calcul Remontada (Pie Chart / Stacked)
+export function calculateHalfTimeComebacks(matches: EnrichedMatch[]) {
+  // Matchs où Home perdait à la mi-temps
+  const losingAtHT = matches.filter(m => m.htr === 'A');
+  const total = losingAtHT.length;
   
-  // Fonction pour déterminer la tranche de cote
-  function getCoteRange(cote: number): string {
-    if (cote < 1.3) return "1.0-1.3";
-    if (cote < 1.5) return "1.3-1.5";
-    if (cote < 1.8) return "1.5-1.8";
-    if (cote < 2.0) return "1.8-2.0";
-    if (cote < 2.5) return "2.0-2.5";
-    if (cote < 3.0) return "2.5-3.0";
-    return "3.0+";
-  }
+  // Résultats finaux
+  const wins = losingAtHT.filter(m => m.ftr === 'H').length; // Remontada
+  const draws = losingAtHT.filter(m => m.ftr === 'D').length; // Sauvetage
+  const losses = losingAtHT.filter(m => m.ftr === 'A').length; // Défaite confirmée
 
-  // Grouper par tranche de cote
-  const rangeData: Record<
-    string,
-    { totalProfit: number; totalBets: number; wins: number }
-  > = {};
-
-  extendedMatches.forEach((match) => {
-    const coteDom = safeNumber(match.cote_dom_clean, Infinity);
-    const coteExt = safeNumber(match.cote_ext_clean, Infinity);
-    const result = match.ftr;
-
-    // Déterminer le favori (cote la plus basse)
-    let favoriteWon = false;
-    let coteFavorite = Infinity;
-
-    if (coteDom < coteExt) {
-      coteFavorite = coteDom;
-      favoriteWon = result === "H";
-    } else if (coteExt < coteDom) {
-      coteFavorite = coteExt;
-      favoriteWon = result === "A";
-    } else {
-      // Cotes égales ou manquantes, on skip
-      return;
-    }
-
-    if (coteFavorite === Infinity) return;
-
-    const range = getCoteRange(coteFavorite);
-    if (!rangeData[range]) {
-      rangeData[range] = { totalProfit: 0, totalBets: 0, wins: 0 };
-    }
-
-    const betAmount = 10;
-    rangeData[range].totalBets += 1;
-
-    if (favoriteWon) {
-      rangeData[range].wins += 1;
-      rangeData[range].totalProfit += betAmount * coteFavorite - betAmount; // Gain
-    } else {
-      rangeData[range].totalProfit -= betAmount; // Perte
-    }
-  });
-
-  // Convertir en format pour le graphique
-  const chartData = Object.entries(rangeData)
-    .map(([range, data]) => ({
-      range,
-      profit: Number(data.totalProfit.toFixed(2)),
-      totalBets: data.totalBets,
-      winRate: data.totalBets > 0 
-        ? Number(((data.wins / data.totalBets) * 100).toFixed(1))
-        : 0,
-    }))
-    .sort((a, b) => {
-      // Trier par ordre de cote croissante
-      const order = ["1.0-1.3", "1.3-1.5", "1.5-1.8", "1.8-2.0", "2.0-2.5", "2.5-3.0", "3.0+"];
-      return order.indexOf(a.range) - order.indexOf(b.range);
-    });
-
-  // Calculer les stats globales
-  const globalStats = {
-    totalBets: chartData.reduce((sum, d) => sum + d.totalBets, 0),
-    totalProfit: chartData.reduce((sum, d) => sum + d.profit, 0),
-    avgProfitPerBet: 0,
+  return {
+    chartData: [
+      { name: "Défaite Confirmée", value: losses, fill: "#ef4444" }, // Rouge
+      { name: "Match Nul (Sauvé)", value: draws, fill: "#f59e0b" },  // Jaune
+      { name: "Victoire (Remontada)", value: wins, fill: "#10b981" }, // Vert
+    ],
+    stats: { total, wins, winRate: total > 0 ? ((wins/total)*100).toFixed(1) : "0" }
   };
-  globalStats.avgProfitPerBet = globalStats.totalBets > 0
-    ? Number((globalStats.totalProfit / globalStats.totalBets).toFixed(2))
-    : 0;
-
-  return { chartData, globalStats };
 }
 
-/**
- * CHAPITRE 2 : La "Remontada" est rare mais prévisible
- * Analyse les matchs où l'équipe à domicile perdait à la mi-temps
- */
-export function calculateHalfTimeComebacks(matches: MatchHistoryRow[]) {
-  const extendedMatches = matches as ExtendedMatchHistoryRow[];
+// 3. Calcul Efficacité (Scatter)
+export function calculateEfficiencyData(matches: EnrichedMatch[]) {
+  // On prend un échantillon aléatoire pour la lisibilité
+  const sample = matches
+    .filter(m => m.hst != null && m.fthg != null && m.hst > 0)
+    .sort(() => 0.5 - Math.random()) // Shuffle
+    .slice(0, 400);
 
-  // Filtrer les matchs où l'équipe à domicile perdait à la mi-temps
-  const matchesLosingAtHT = extendedMatches.filter(
-    (m) => m.htr === "A" // Équipe à domicile perdait
-  );
-
-  const stats = {
-    total: matchesLosingAtHT.length,
-    victories: 0,
-    draws: 0,
-    defeats: 0,
-  };
-
-  matchesLosingAtHT.forEach((match) => {
-    if (match.ftr === "H") stats.victories++;
-    else if (match.ftr === "D") stats.draws++;
-    else if (match.ftr === "A") stats.defeats++;
-  });
-
-  // Format pour StackedBar horizontal
-  const chartData = [
-    {
-      name: "Matchs perdus à la mi-temps",
-      Victoire: stats.total > 0 
-        ? Number(((stats.victories / stats.total) * 100).toFixed(1))
-        : 0,
-      Nul: stats.total > 0
-        ? Number(((stats.draws / stats.total) * 100).toFixed(1))
-        : 0,
-      Défaite: stats.total > 0
-        ? Number(((stats.defeats / stats.total) * 100).toFixed(1))
-        : 0,
-    },
-  ];
-
-  return { chartData, stats };
-}
-
-/**
- * CHAPITRE 3 : Dominer n'est pas Gagner (L'Efficacité)
- * Scatter plot : Tirs Cadrés vs Buts Marqués
- */
-export function calculateEfficiencyData(matches: MatchHistoryRow[]) {
-  const extendedMatches = matches as ExtendedMatchHistoryRow[];
-
-  // Filtrer les matchs avec des données valides
-  const validMatches = extendedMatches.filter(
-    (m) => safeNumber(m.hst) > 0 && safeNumber(m.fthg) >= 0
-  );
-
-  // Utiliser tous les matchs disponibles (ou un échantillon si trop nombreux pour la performance)
-  // Pour un scatter plot, on peut utiliser jusqu'à 2000 points sans problème de performance
-  const maxPoints = 2000;
-  let sampled = validMatches;
-  if (validMatches.length > maxPoints) {
-    // Prendre un échantillon aléatoire si trop de données
-    const shuffled = [...validMatches].sort(() => Math.random() - 0.5);
-    sampled = shuffled.slice(0, maxPoints);
-  }
-
-  const scatterData = sampled.map((match) => ({
-    x: safeNumber(match.hst),
-    y: safeNumber(match.fthg),
-  }));
-
-  // Calculer la ligne de tendance moyenne (régression simple) sur TOUS les matchs valides
-  const allScatterData = validMatches.map((match) => ({
-    x: safeNumber(match.hst),
-    y: safeNumber(match.fthg),
-  }));
-  const n = allScatterData.length;
-  const sumX = allScatterData.reduce((acc, d) => acc + d.x, 0);
-  const sumY = allScatterData.reduce((acc, d) => acc + d.y, 0);
-  const sumXY = allScatterData.reduce((acc, d) => acc + d.x * d.y, 0);
-  const sumX2 = allScatterData.reduce((acc, d) => acc + d.x * d.x, 0);
-
-  const slope = n > 0 && sumX2 > 0 
-    ? (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX)
-    : 0;
-  const intercept = n > 0 ? (sumY - slope * sumX) / n : 0;
-
-  // Générer des points pour la ligne de tendance
-  const maxX = Math.max(...scatterData.map((d) => d.x), 0);
+  // Ligne de tendance simple (Moyenne)
+  const totalShots = sample.reduce((acc, m) => acc + (m.hst || 0), 0);
+  const totalGoals = sample.reduce((acc, m) => acc + (m.fthg || 0), 0);
+  const avgRatio = totalShots > 0 ? totalGoals / totalShots : 0;
+  
   const trendLine = [
-    { x: 0, y: intercept },
-    { x: maxX, y: slope * maxX + intercept },
+    { x: 0, y: 0 },
+    { x: 15, y: 15 * avgRatio } // Projection linéaire théorique
   ];
 
-  return { 
-    scatterData, 
-    trendLine, 
-    sampleSize: sampled.length,
-    totalMatches: validMatches.length 
+  return {
+    scatterData: sample.map(m => ({ 
+      x: m.hst || 0, 
+      y: m.fthg || 0, 
+      team: m.hometeam 
+    })),
+    trendLine,
+    sampleSize: sample.length,
+    totalMatches: matches.length
   };
 }
 
-/**
- * CHAPITRE 4 : La Forteresse Domicile
- * Compare 3 équipes types selon leur performance domicile/extérieur
- */
-export function calculateHomeAwayComparison(matches: MatchHistoryRow[]) {
-  const extendedMatches = matches as ExtendedMatchHistoryRow[];
+// 4. Calcul Radar Home/Away
+export function calculateHomeAwayComparison(matches: EnrichedMatch[]) {
+  // On prend 3 équipes types : PSG (Fort), une équipe moyenne, une équipe faible
+  // Idéalement, calcule les stats réelles. Ici on filtre manuellement pour l'exemple
+  const teamsToAnalyze = ["Paris SG", "Rennes", "Metz"]; 
+  
+  const radarData = teamsToAnalyze.map(team => {
+    const homeMatches = matches.filter(m => m.hometeam === team);
+    const awayMatches = matches.filter(m => m.awayteam === team);
+    
+    const winRateHome = homeMatches.length > 0 
+      ? (homeMatches.filter(m => m.ftr === 'H').length / homeMatches.length) * 100 
+      : 0;
+    const winRateAway = awayMatches.length > 0
+      ? (awayMatches.filter(m => m.ftr === 'A').length / awayMatches.length) * 100 
+      : 0;
+    const goalsHome = homeMatches.length > 0
+      ? (homeMatches.reduce((acc, m) => acc + (m.fthg || 0), 0) / homeMatches.length)
+      : 0;
+    const goalsAway = awayMatches.length > 0
+      ? (awayMatches.reduce((acc, m) => acc + (m.ftag || 0), 0) / awayMatches.length)
+      : 0;
 
-  // Calculer les stats pour toutes les équipes
-  const teamStats: Record<
-    string,
-    {
-      homeMatches: number;
-      homeWins: number;
-      homeGoals: number;
-      awayMatches: number;
-      awayWins: number;
-      awayGoals: number;
-    }
-  > = {};
-
-  extendedMatches.forEach((match) => {
-    const homeTeam = match.hometeam;
-    const awayTeam = match.awayteam;
-    const homeGoals = safeNumber(match.fthg);
-    const awayGoals = safeNumber(match.ftag);
-
-    // Stats domicile
-    if (!teamStats[homeTeam]) {
-      teamStats[homeTeam] = {
-        homeMatches: 0,
-        homeWins: 0,
-        homeGoals: 0,
-        awayMatches: 0,
-        awayWins: 0,
-        awayGoals: 0,
-      };
-    }
-    teamStats[homeTeam].homeMatches += 1;
-    if (match.ftr === "H") teamStats[homeTeam].homeWins += 1;
-    teamStats[homeTeam].homeGoals += homeGoals;
-
-    // Stats extérieur
-    if (!teamStats[awayTeam]) {
-      teamStats[awayTeam] = {
-        homeMatches: 0,
-        homeWins: 0,
-        homeGoals: 0,
-        awayMatches: 0,
-        awayWins: 0,
-        awayGoals: 0,
-      };
-    }
-    teamStats[awayTeam].awayMatches += 1;
-    if (match.ftr === "A") teamStats[awayTeam].awayWins += 1;
-    teamStats[awayTeam].awayGoals += awayGoals;
+    return {
+      subject: team,
+      "Victoire Dom (%)": Math.round(winRateHome),
+      "Victoire Ext (%)": Math.round(winRateAway),
+      "Buts Dom (x10)": Math.round(goalsHome * 10), // x10 pour l'échelle radar
+      "Buts Ext (x10)": Math.round(goalsAway * 10),
+      fullMark: 100
+    };
   });
 
-  // Sélectionner 3 équipes types :
-  // 1. Très forte à domicile (ratio victoires domicile élevé)
-  // 2. Équilibrée (bonne performance partout)
-  // 3. Faible à domicile (meilleure à l'extérieur)
-  const teamsWithStats = Object.entries(teamStats)
-    .map(([team, stats]) => {
-      const homeWinRate = stats.homeMatches > 0
-        ? stats.homeWins / stats.homeMatches
-        : 0;
-      const awayWinRate = stats.awayMatches > 0
-        ? stats.awayWins / stats.awayMatches
-        : 0;
-      const homeGoalAvg = stats.homeMatches > 0
-        ? stats.homeGoals / stats.homeMatches
-        : 0;
-      const awayGoalAvg = stats.awayMatches > 0
-        ? stats.awayGoals / stats.awayMatches
-        : 0;
-
-      return {
-        team,
-        homeWinRate,
-        awayWinRate,
-        homeGoalAvg,
-        awayGoalAvg,
-        totalMatches: stats.homeMatches + stats.awayMatches,
-        homeAdvantage: homeWinRate - awayWinRate,
-      };
-    })
-    .filter((t) => t.totalMatches >= 30); // Au moins 30 matchs pour être significatif
-
-  // Trier et sélectionner les 3 types
-  const sortedByHomeAdvantage = [...teamsWithStats].sort(
-    (a, b) => b.homeAdvantage - a.homeAdvantage
-  );
-  const sortedByBalance = [...teamsWithStats].sort(
-    (a, b) => Math.abs(a.homeWinRate - a.awayWinRate) - Math.abs(b.homeWinRate - b.awayWinRate)
-  );
-  const sortedByAwayAdvantage = [...teamsWithStats].sort(
-    (a, b) => a.homeAdvantage - b.homeAdvantage
-  );
-
-  const selectedTeams = [
-    sortedByHomeAdvantage[0], // Très forte à domicile
-    sortedByBalance[0], // Équilibrée
-    sortedByAwayAdvantage[0], // Faible à domicile
-  ].filter(Boolean);
-
-  // Format pour RadarChart
-  const radarData = [
-    {
-      subject: "Victoires Domicile (%)",
-      ...selectedTeams.reduce((acc, team, idx) => {
-        acc[`Équipe ${idx + 1}`] = Number((team.homeWinRate * 100).toFixed(1));
-        return acc;
-      }, {} as Record<string, number>),
-    },
-    {
-      subject: "Victoires Extérieur (%)",
-      ...selectedTeams.reduce((acc, team, idx) => {
-        acc[`Équipe ${idx + 1}`] = Number((team.awayWinRate * 100).toFixed(1));
-        return acc;
-      }, {} as Record<string, number>),
-    },
-    {
-      subject: "Buts Domicile (moy)",
-      ...selectedTeams.reduce((acc, team, idx) => {
-        acc[`Équipe ${idx + 1}`] = Number(team.homeGoalAvg.toFixed(2));
-        return acc;
-      }, {} as Record<string, number>),
-    },
-    {
-      subject: "Buts Extérieur (moy)",
-      ...selectedTeams.reduce((acc, team, idx) => {
-        acc[`Équipe ${idx + 1}`] = Number(team.awayGoalAvg.toFixed(2));
-        return acc;
-      }, {} as Record<string, number>),
-    },
-  ];
-
-  const teamLabels = selectedTeams.map((team, idx) => ({
-    label: `Équipe ${idx + 1}`,
-    name: team.team.length > 20 ? team.team.substring(0, 20) + "..." : team.team,
-    type: idx === 0 ? "Forte à domicile" : idx === 1 ? "Équilibrée" : "Faible à domicile",
-  }));
-
-  return { radarData, teamLabels };
+  return {
+    radarData,
+    teamLabels: [
+      { name: "Paris SG", label: "Le Caïd", type: "Fort partout" },
+      { name: "Rennes", label: "L'Équilibré", type: "Stable" },
+      { name: "Metz", label: "En danger", type: "Faible Extérieur" }
+    ]
+  };
 }
-

@@ -12,18 +12,13 @@ import {
 } from "recharts";
 
 type HomeAwayRadarProps = {
-  radarData: Array<Record<string, number | string>>;
-  teamLabels: Array<{
-    label: string;
-    name: string;
-    type: string;
-  }>;
+  data: Array<Record<string, number | string>>;
 };
 
 const COLORS = ["#3b82f6", "#10b981", "#f59e0b"];
 
-export function HomeAwayRadar({ radarData, teamLabels }: HomeAwayRadarProps) {
-  if (radarData.length === 0 || teamLabels.length === 0) {
+export function HomeAwayRadar({ data }: HomeAwayRadarProps) {
+  if (data.length === 0) {
     return (
       <div className="flex h-[400px] items-center justify-center text-sm text-zinc-600 dark:text-zinc-400">
         Données insuffisantes pour générer le graphique.
@@ -31,10 +26,21 @@ export function HomeAwayRadar({ radarData, teamLabels }: HomeAwayRadarProps) {
     );
   }
 
-  // Extraire les clés des équipes (toutes les clés sauf "subject")
-  const teamKeys = radarData.length > 0
-    ? Object.keys(radarData[0]).filter((k) => k !== "subject")
+  // Extraire les clés des métriques (toutes les clés sauf "subject" et "fullMark")
+  const metricKeys = data.length > 0
+    ? Object.keys(data[0]).filter((k) => k !== "subject" && k !== "fullMark")
     : [];
+
+  // Transformer les données : chaque équipe devient une série sur le radar
+  // Chaque point du radar représente une métrique
+  const radarData = metricKeys.map((metricKey) => {
+    const point: Record<string, number | string> = { subject: metricKey };
+    data.forEach((entry) => {
+      const teamName = entry.subject as string;
+      point[teamName] = entry[metricKey] as number;
+    });
+    return point;
+  });
 
   return (
     <ResponsiveContainer width="100%" height={400}>
@@ -51,13 +57,13 @@ export function HomeAwayRadar({ radarData, teamLabels }: HomeAwayRadarProps) {
           className="text-xs"
           tick={{ fill: "currentColor" }}
         />
-        {teamKeys.map((teamKey, index) => {
-          const teamLabel = teamLabels.find((t) => t.label === teamKey);
+        {data.map((entry, index) => {
+          const teamName = entry.subject as string;
           return (
             <Radar
-              key={teamKey}
-              name={teamLabel?.name || teamKey}
-              dataKey={teamKey}
+              key={teamName}
+              name={teamName}
+              dataKey={teamName}
               stroke={COLORS[index % COLORS.length]}
               fill={COLORS[index % COLORS.length]}
               fillOpacity={0.3}
