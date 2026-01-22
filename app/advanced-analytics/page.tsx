@@ -8,11 +8,12 @@ export default async function AdvancedAnalyticsPage() {
   const supabase = createSupabaseServerClient();
 
   // Récupérer toutes les données nécessaires en une seule requête optimisée
-  // Inclure htr si disponible dans la base de données
+  // .range(0, 9999) pour dépasser la limite par défaut de 1000 lignes de Supabase
   const { data, error } = await supabase
     .from("match_history")
     .select("saison, date, hometeam, awayteam, fthg, ftag, ftr, cote_dom_clean, cote_ext_clean, hs, hst, htr")
-    .order("date", { ascending: true });
+    .order("date", { ascending: true })
+    .range(0, 9999);
 
   if (error) {
     return (
