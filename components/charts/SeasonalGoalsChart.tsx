@@ -97,3 +97,4 @@ export function SeasonalGoalsChart({ data, stats }: SeasonalGoalsChartProps) {
 }
 
 
+

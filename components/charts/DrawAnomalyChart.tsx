@@ -88,3 +88,4 @@ export function DrawAnomalyChart({ data, avgDrawRate }: DrawAnomalyChartProps) {
 }
 
 
+

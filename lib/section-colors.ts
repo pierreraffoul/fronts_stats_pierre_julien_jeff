@@ -94,3 +94,4 @@ export const SECTION_COLORS = {
 
 export type SectionColor = typeof SECTION_COLORS[keyof typeof SECTION_COLORS];
 
+

@@ -66,11 +66,11 @@ export function CornerEfficiencyChart({ data, avgRatio }: CornerEfficiencyChartP
               border: "1px solid #e4e4e7",
               borderRadius: "8px",
             }}
-            formatter={(value: number, name: string, props: { payload: { goals: number; corners: number; matches: number } }) => {
-              const { goals, corners, matches } = props.payload;
+            formatter={(value: number | undefined, name: string | undefined, props: any) => {
+              const { goals, corners, matches } = props?.payload || {};
               return [
-                `${value} but/corner`,
-                `${goals} buts sur ${corners} corners (${matches} matchs)`
+                `${value ?? 0} but/corner`,
+                `${goals ?? 0} buts sur ${corners ?? 0} corners (${matches ?? 0} matchs)`
               ];
             }}
           />
@@ -89,5 +89,6 @@ export function CornerEfficiencyChart({ data, avgRatio }: CornerEfficiencyChartP
     </div>
   );
 }
+
 
 

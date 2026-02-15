@@ -9,6 +9,7 @@ import { useState } from "react";
 const navLinks = [
   { href: "/", label: "Accueil" },
   { href: "/analytics", label: "Analytics" },
+  { href: "/predict", label: "Prédiction" },
 ];
 
 export function Navbar() {
@@ -105,4 +106,5 @@ export function Navbar() {
     </nav>
   );
 }
+
 
